@@ -205,32 +205,60 @@ export class impl implements provider.Provider {
     }
 
     private async convertStreamResponse(geminiResponse: Response): Promise<Response> {
+        let textBlockStarted = false
+        
         return utils.processProviderStream(geminiResponse, (jsonStr, textBlockIndex, toolUseBlockIndex) => {
             const geminiData = JSON.parse(jsonStr) as types.GeminiResponse
             if (!geminiData.candidates || geminiData.candidates.length === 0) {
                 return null
             }
-
+    
             const candidate = geminiData.candidates[0]
             const events: string[] = []
-            let currentTextIndex = textBlockIndex
             let currentToolIndex = toolUseBlockIndex
-
+    
             if (candidate.content) {
                 for (const part of candidate.content.parts) {
                     if ('text' in part && part.text) {
-                        events.push(...utils.processTextPart(part.text, currentTextIndex))
-                        currentTextIndex++
+                        if (!textBlockStarted) {
+                            // 只在第一次发 content_block_start
+                            events.push(
+                                `event: content_block_start\ndata: ${JSON.stringify({
+                                    type: 'content_block_start',
+                                    index: 0,
+                                    content_block: { type: 'text', text: '' }
+                                })}\n\n`
+                            )
+                            textBlockStarted = true
+                        }
+                        // 每个 chunk 只发 delta
+                        events.push(
+                            `event: content_block_delta\ndata: ${JSON.stringify({
+                                type: 'content_block_delta',
+                                index: 0,
+                                delta: { type: 'text_delta', text: part.text }
+                            })}\n\n`
+                        )
                     } else if ('functionCall' in part) {
                         events.push(...utils.processToolUsePart(part.functionCall, currentToolIndex))
                         currentToolIndex++
                     }
                 }
             }
-
+    
+            // 最后一个 chunk 发 content_block_stop
+            if (candidate.finishReason && textBlockStarted) {
+                events.push(
+                    `event: content_block_stop\ndata: ${JSON.stringify({
+                        type: 'content_block_stop',
+                        index: 0
+                    })}\n\n`
+                )
+            }
+    
             return {
                 events,
-                textBlockIndex: currentTextIndex,
+                textBlockIndex: textBlockStarted ? 1 : textBlockIndex,
                 toolUseBlockIndex: currentToolIndex
             }
         })
