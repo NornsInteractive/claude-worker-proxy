@@ -184,21 +184,48 @@ export function cleanJsonSchema(schema: any): any {
         return schema
     }
 
+    // Gemini 不支持的 JSON Schema 字段
+    const unsupportedKeys = [
+        '$schema', 'additionalProperties', 'title', 'examples',
+        'propertyNames', 'exclusiveMinimum', 'exclusiveMaximum',
+        'const', 'if', 'then', 'else', 'allOf', 'not',
+        'unevaluatedProperties', 'unevaluatedItems', 'contains',
+        'minContains', 'maxContains', 'deprecated', 'readOnly', 'writeOnly'
+    ]
+
     const cleaned = { ...schema }
 
+    // 处理 anyOf：转换为 Gemini 支持的格式
+    if (cleaned.anyOf) {
+        const types = cleaned.anyOf
+            .map((s: any) => s.type)
+            .filter((t: any) => t && t !== 'null')
+        if (types.length === 1) {
+            cleaned.type = types[0]
+        }
+        delete cleaned.anyOf
+    }
+
+    for (const key of unsupportedKeys) {
+        delete cleaned[key]
+    }
+
+    // 递归处理嵌套对象
     for (const key in cleaned) {
-        if (key === '$schema' || key === 'additionalProperties' || key === 'title' || key === 'examples') {
-            delete cleaned[key]
-        } else if (key === 'enum' && Array.isArray(cleaned[key])) {
-            cleaned[key] = cleaned[key]
-        } else if (key === 'format' && cleaned.type === 'string') {
-            delete cleaned[key]
-        } else if (key === 'properties' && typeof cleaned[key] === 'object') {
-            cleaned[key] = cleanJsonSchema(cleaned[key])
+        if (key === 'properties' && typeof cleaned[key] === 'object') {
+            const cleanedProps: any = {}
+            for (const prop in cleaned[key]) {
+                cleanedProps[prop] = cleanJsonSchema(cleaned[key][prop])
+            }
+            cleaned[key] = cleanedProps
         } else if (key === 'items' && typeof cleaned[key] === 'object') {
             cleaned[key] = cleanJsonSchema(cleaned[key])
         } else if (typeof cleaned[key] === 'object' && !Array.isArray(cleaned[key])) {
             cleaned[key] = cleanJsonSchema(cleaned[key])
+        } else if (Array.isArray(cleaned[key])) {
+            cleaned[key] = cleaned[key].map((item: any) =>
+                typeof item === 'object' ? cleanJsonSchema(item) : item
+            )
         }
     }
 
