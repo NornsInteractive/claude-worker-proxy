@@ -11,9 +11,12 @@ export class impl implements provider.Provider {
         const finalUrl = utils.buildUrl(baseUrl, endpoint)
 
         const headers = new Headers(request.headers)
+        const headers = new Headers(request.headers)
         headers.set('x-goog-api-key', apiKey)
         headers.set('Content-Type', 'application/json')
-
+        headers.delete('authorization')
+        headers.delete('x-api-key')
+        
         return new Request(finalUrl, {
             method: 'POST',
             headers,
